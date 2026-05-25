@@ -3,9 +3,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { ENDPOINTS } from './endpoints';
 
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+
 const client = axios.create({
-    // ⚠️ Sửa đúng IP backend của bạn
-    baseURL: 'http://192.168.2.120:8000',
+    baseURL: API_BASE_URL,
     timeout: 15000,
     headers: {
         'Content-Type': 'application/json',
@@ -96,5 +97,26 @@ client.interceptors.response.use(
         return Promise.reject(error);
     }
 );
+
+client.interceptors.request.use((config) => {
+    const isFormData =
+        typeof FormData !== 'undefined' && config.data instanceof FormData;
+
+    if (isFormData) {
+        // QUAN TRỌNG: xóa content-type JSON nếu đang bị set mặc định
+        if (config.headers) {
+            delete config.headers['Content-Type'];
+            delete config.headers['content-type'];
+        }
+        // axios sẽ tự set multipart/form-data; boundary=...
+    } else {
+        // các request JSON bình thường
+        if (config.headers && !config.headers['Content-Type']) {
+            config.headers['Content-Type'] = 'application/json';
+        }
+    }
+
+    return config;
+});
 
 export default client;

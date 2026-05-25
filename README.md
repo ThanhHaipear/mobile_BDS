@@ -96,13 +96,13 @@ BDS_mobile/
 
 The app communicates with a backend API through `src/api/client.js` and endpoint constants in `src/api/endpoints.js`.
 
-Current configured base URL:
+Configure the backend base URL through an Expo public environment variable:
 
-```js
-baseURL: 'http://10.218.14.21:8000'
+```bash
+EXPO_PUBLIC_API_BASE_URL=http://your-backend-host:8000
 ```
 
-Before running the app on another machine or network, update this value to match your backend server IP/domain.
+Use `.env.example` as a template. For local development, create a `.env.local` file and set the backend server IP/domain that is reachable from your emulator or physical device.
 
 Main API groups used by the app:
 

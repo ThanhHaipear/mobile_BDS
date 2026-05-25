@@ -20,7 +20,7 @@ export const ENDPOINTS = {
 
     USER_PUBLIC_PROFILE: (userId) => `/api/accounts/users/${userId}/public-profile/`,
 
-    UPLOAD_IMAGE: '/api/upload/',
+    UPLOAD_IMAGE: '/api/accounts/me/avatar/',
 
     CHATBOT: '/api/chatbot/',
 

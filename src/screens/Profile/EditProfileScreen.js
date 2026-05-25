@@ -35,18 +35,11 @@ const toAbsoluteMediaUrl = (maybePath) => {
     return base ? `${base}/${path}` : s;
 };
 
-const guessMime = (uri) => {
-    const u = (uri || '').toLowerCase();
-    if (u.endsWith('.png')) return 'image/png';
-    if (u.endsWith('.webp')) return 'image/webp';
-    return 'image/jpeg';
-};
-
 export default function EditProfileScreen({ route, navigation }) {
     const { profile } = route.params || {};
 
     const [email] = useState(profile?.email ?? '');
-    const [username] = useState(profile?.username ?? ''); // ✅ khóa
+    const [username] = useState(profile?.username ?? ''); // khóa
 
     const [firstName, setFirstName] = useState(profile?.first_name ?? '');
     const [lastName, setLastName] = useState(profile?.last_name ?? '');
@@ -57,8 +50,11 @@ export default function EditProfileScreen({ route, navigation }) {
     const [address, setAddress] = useState(profile?.address ?? '');
     const [bio, setBio] = useState(profile?.bio ?? '');
 
+    // avatar hiển thị
     const initialAvatarAbs = toAbsoluteMediaUrl(profile?.anh_dai_dien) || DEFAULT_AVATAR;
     const [avatar, setAvatar] = useState(initialAvatarAbs);
+
+    // avatarLocal để upload
     const [avatarLocal, setAvatarLocal] = useState(null);
 
     const [loading, setLoading] = useState(false);
@@ -90,22 +86,48 @@ export default function EditProfileScreen({ route, navigation }) {
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
                 allowsEditing: true,
                 aspect: [1, 1],
-                quality: 0.9,
+                quality: 0.7,
+                base64: true,
             });
-
 
             if (!result.canceled) {
                 const asset = result.assets?.[0];
                 if (!asset?.uri) return;
 
                 setAvatarLocal({ uri: asset.uri });
-                setAvatar(asset.uri);
+                setAvatar(asset.uri); // preview ngay
             }
         } catch (e) {
             console.log('pickAvatar error:', e?.message || e);
             Alert.alert('Lỗi', 'Không thể chọn ảnh. Vui lòng thử lại.');
         }
     };
+
+    // 1) Update text profile (JSON)
+    const updateProfileText = async (payload) => {
+        // Backend bạn từng báo PATCH 405, nên ưu tiên PUT
+        // Nếu backend chỉ hỗ trợ POST, bạn đổi sang client.post(...)
+        return client.put(ENDPOINTS.PROFILE_UPDATE, payload);
+    };
+
+    // 2) Upload avatar riêng (multipart)
+    const uploadAvatar = async (uri) => {
+        const form = new FormData();
+        form.append('avatar', {
+            uri,
+            name: `avatar_${Date.now()}.jpg`,
+            type: 'image/jpeg',
+        });
+
+        return client.post(ENDPOINTS.UPLOAD_IMAGE, form, {
+            headers: {
+                // ép multipart để tránh bị client set application/json
+                'Content-Type': 'multipart/form-data',
+            },
+            transformRequest: (data) => data, // chặn axios stringify FormData
+        });
+    };
+
 
     const handleSave = async () => {
         try {
@@ -123,38 +145,58 @@ export default function EditProfileScreen({ route, navigation }) {
 
             setLoading(true);
 
-            const form = new FormData();
-            form.append('first_name', firstNameTrim);
-            form.append('last_name', lastNameTrim);
-            form.append('so_dien_thoai', phoneTrim || '');
-            form.append('cccd_number', cccdTrim || '');
-            form.append('address', addressTrim || '');
-            form.append('bio', bioTrim || '');
+            // ✅ STEP 1: update text
+            const payload = {
+                first_name: firstNameTrim,
+                last_name: lastNameTrim,
+                so_dien_thoai: phoneTrim || '',
+                cccd_number: cccdTrim || '',
+                address: addressTrim || '',
+                bio: bioTrim || '',
+            };
 
+            const resText = await updateProfileText(payload);
+
+            // ✅ STEP 2: upload avatar nếu có chọn ảnh mới
+            let resAvatarData = null;
             if (avatarLocal?.uri) {
-                form.append('anh_dai_dien', {
-                    uri: avatarLocal.uri,
-                    name: `avatar_${Date.now()}.jpg`,
-                    type: guessMime(avatarLocal.uri),
-                });
+                try {
+                    const resAvatar = await uploadAvatar(avatarLocal.uri);
+                    resAvatarData = resAvatar?.data;
+                } catch (e) {
+                    console.log('UPLOAD AVATAR STATUS:', e?.response?.status);
+                    console.log('UPLOAD AVATAR DATA:', e?.response?.data || e?.message);
+
+                    // Nếu key "avatar" sai, thử đổi key sang "anh_dai_dien"
+                    Alert.alert(
+                        'Lỗi upload ảnh',
+                        'Không upload được ảnh. Nếu backend yêu cầu field khác, hãy báo mình để đổi key upload.'
+                    );
+                    // vẫn cho phép lưu text thành công
+                }
             }
 
-            // ✅ Backend không cho PATCH -> dùng PUT
-            // ✅ Không set Content-Type thủ công (axios tự thêm boundary)
-            const res = await client.put(ENDPOINTS.PROFILE_UPDATE, form);
+            // ✅ set avatar url mới nếu backend trả về path/url
+            const merged = {
+                ...(resText?.data || {}),
+                ...(resAvatarData || {}),
+            };
 
-            console.log('Cập nhật profile:', res.data);
+            const newAvatar =
+                toAbsoluteMediaUrl(merged?.anh_dai_dien || merged?.avatar || merged?.image || merged?.url) ||
+                toAbsoluteMediaUrl(resText?.data?.anh_dai_dien) ||
+                initialAvatarAbs ||
+                DEFAULT_AVATAR;
 
-            // cache-bust
-            const newAbs = toAbsoluteMediaUrl(res.data?.anh_dai_dien) || initialAvatarAbs || DEFAULT_AVATAR;
-            setAvatar(`${newAbs}?t=${Date.now()}`);
+            // cache-bust để load ảnh mới
+            setAvatar(`${newAvatar}?t=${Date.now()}`);
             setAvatarLocal(null);
 
             Alert.alert('Thành công', 'Đã cập nhật thông tin tài khoản');
             navigation.goBack();
         } catch (e) {
             console.log('STATUS:', e?.response?.status);
-            console.log('DATA:', e?.response?.data || e.message);
+            console.log('DATA:', e?.response?.data || e?.message);
             Alert.alert('Thất bại', 'Không cập nhật được thông tin. Vui lòng thử lại.');
         } finally {
             setLoading(false);
